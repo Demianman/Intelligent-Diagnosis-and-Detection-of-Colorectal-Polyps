@@ -1,3 +1,6 @@
+# 只是用来存档备份一下 有很多做尝试时混乱的文件夹在里面没有整理（汗）
+# This is just for archiving and backup purposes. There are many messy folders inside from when I was experimenting that haven't been organized (oops).
+
 # Official YOLOv7
 
 Implementation of paper - [YOLOv7: Trainable bag-of-freebies sets new state-of-the-art for real-time object detectors](https://arxiv.org/abs/2207.02696)
