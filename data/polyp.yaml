@@ -1,0 +1,8 @@
+train: C:\Users\aa\Desktop\DESKTOP_PACKEGS\yolov7-main\data\datasets\polyp\images\train
+val: C:\Users\aa\Desktop\DESKTOP_PACKEGS\yolov7-main\data\datasets\polyp\images\val
+test: C:\Users\aa\Desktop\DESKTOP_PACKEGS\yolov7-main\data\datasets\polyp\images\test
+# number of classes
+nc: 2
+
+# class names
+names: [ 'Hyperplastic polyp' ,'Adenomatous polyp']

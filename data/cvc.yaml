@@ -1,0 +1,5 @@
+train: datasets/cvc/images/train
+val: datasets/cvc/images/val
+
+nc: 1
+names: ['polyp']

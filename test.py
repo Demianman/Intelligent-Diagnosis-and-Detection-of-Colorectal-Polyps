@@ -17,14 +17,13 @@ from utils.metrics import ap_per_class, ConfusionMatrix
 from utils.plots import plot_images, output_to_target, plot_study_txt
 from utils.torch_utils import select_device, time_synchronized, TracedModel
 
-from PIL import Image
 
 def test(data,
          weights=None,
          batch_size=32,
          imgsz=640,
-         conf_thres=0.1,
-         iou_thres=0.5,  # for NMS
+         conf_thres=0.001,
+         iou_thres=0.6,  # for NMS
          save_json=False,
          single_cls=False,
          augment=False,
@@ -50,7 +49,7 @@ def test(data,
     else:  # called directly
         set_logging()
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+        # device = select_device(opt.device, batch_size=batch_size)
 
         # Directories
         save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
@@ -60,7 +59,7 @@ def test(data,
         model = attempt_load(weights, map_location=device)  # load FP32 model
         gs = max(int(model.stride.max()), 32)  # grid size (max stride)
         imgsz = check_img_size(imgsz, s=gs)  # check img_size
-        
+
         if trace:
             model = TracedModel(model, device, imgsz)
 
@@ -72,12 +71,12 @@ def test(data,
     # Configure
     model.eval()
     if isinstance(data, str):
-        is_coco = data.endswith('co_test3.yaml')
+        is_coco = data.endswith('co_test2.yaml')
         with open(data) as f:
             data = yaml.load(f, Loader=yaml.SafeLoader)
     check_dataset(data)  # check
     nc = 1 if single_cls else int(data['nc'])  # number of classes
-    iouv = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
+    iouv = torch.linspace(0.5,0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
     niou = iouv.numel()
 
     # Logging
@@ -88,20 +87,20 @@ def test(data,
     if not training:
         if device.type != 'cpu':
             model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
-        task = opt.task if opt.task in ('train', 'val', 'test') else 'test'  # path to train/val/test images
+        task = opt.task if opt.task in ('train', 'val', 'test') else 'val'  # path to train/val/test images
         dataloader = create_dataloader(data[task], imgsz, batch_size, gs, opt, pad=0.5, rect=True,
                                        prefix=colorstr(f'{task}: '))[0]
 
     if v5_metric:
         print("Testing with YOLOv5 AP metric...")
-    
+
     seen = 0
     confusion_matrix = ConfusionMatrix(nc=nc)
     names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
     coco91class = coco80_to_coco91_class()
-    s = ('%20s' + '%12s' * 8) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5','mAP@.75', 'mAP@.5:.95','F1')
-
-    dt, p, r, mp, mr, map50, map75, map85, map95, map_95, f1m, t0, t1 = [0., 0.,0.], 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.
+    s = ('%20s' + '%12s' * 10) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5','mAP@.75','mAP@.85', 'mAP@.95','mAP@.5:.95', 'F1')
+    # p, r, f1, mp, mr, map50, map, t0, t1 = 0., 0., 0., 0., 0., 0., 0., 0., 0.
+    dt, p, r, mp, mr, map50, map75,map85, map95,map_95 ,f1m, t0, t1 = [0., 0., 0.], 0., 0., 0., 0., 0., 0., 0., 0.,0.,0.,0., 0.
     loss = torch.zeros(3, device=device)
     jdict, stats, ap, ap_class, wandb_images = [], [], [], [], []
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
@@ -225,23 +224,27 @@ def test(data,
     stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy
     if len(stats) and stats[0].any():
         p, r, ap, f1, ap_class = ap_per_class(*stats, plot=plots, v5_metric=v5_metric, save_dir=save_dir, names=names)
+        # ap50, ap = ap[:, 0], ap.mean(1)  # AP@0.5, AP@0.5:0.95
+        # mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
 
-        ap50, ap75, ap85, ap95, ap = ap[:, 0], ap[:, 5], ap[:, 7], ap[:, 9], ap.mean(1)
-        mp, mr, map50, map75, map85, map95, map_95, f1m = p.mean(), r.mean(), ap50.mean(), ap75.mean(), ap85.mean(), ap95.mean(), ap.mean(), f1.mean()
-
+        ap50, ap75,ap85, ap95,ap = ap[:, 0],ap[:, 5], ap[:, 7], ap[:, 9] , ap.mean(1)
+        mp, mr, map50,map75, map85, map95,map_95, f1m = p.mean(), r.mean(), ap50.mean(), ap75.mean(),ap85.mean(), ap95.mean(),ap.mean(), f1.mean()
         nt = np.bincount(stats[3].astype(np.int64), minlength=nc)  # number of targets per class
     else:
         nt = torch.zeros(1)
 
     # Print results
+    # pf = '%20s' + '%12i' * 2 + '%12.3g' * 4  # print format
+    # print(pf % ('all', seen, nt.sum(), mp, mr, map50, map))
 
-    pf = '%20s' + '%12i' * 2 + '%12.3g' * 8  # print format
-    print(pf % ('all', seen, nt.sum(), mp, mr, map50, map75, map85, map95, map_95, f1m))
+    pf = '%20s' + '%12i' * 2 + '%12.3g' * 8 # print format
+    print(pf % ('all', seen, nt.sum(), mp, mr, map50, map75,map85, map95, map_95,f1m))
 
     # Print results per class
     if (verbose or (nc < 50 and not training)) and nc > 1 and len(stats):
         for i, c in enumerate(ap_class):
-            print(pf % (names[c], seen, nt[c], p[i], r[i], ap50[i], ap75[i], ap85[i], ap95[i], ap[i], f1[i]))
+            # print(pf % (names[c], seen, nt[c], p[i], r[i], ap50[i], ap[i]))
+            print(pf % (names[c], seen, nt[c], p[i], r[i], ap50[i], ap75[i],ap85[i], ap95[i], ap[i],f1[i]))
     # Print speeds
     t = tuple(x / seen * 1E3 for x in (t0, t1, t0 + t1)) + (imgsz, imgsz, batch_size)  # tuple
     if not training:
@@ -277,9 +280,8 @@ def test(data,
             eval.evaluate()
             eval.accumulate()
             eval.summarize()
-            #map, map50,map75,fim = eval.stats[:4]
-            map50, map75, map85, map95, map_95, fim = eval.stats[:6]
-            #map, map50 = eval.stats[:2]  # update results (mAP@0.5:0.95, mAP@0.5)
+            map50,map75, map85, map95,map_95, fim = eval.stats[:6]
+            # map, map50 = eval.stats[:2]  # update results (mAP@0.5:0.95, mAP@0.5)
         except Exception as e:
             print(f'pycocotools unable to run: {e}')
 
@@ -291,17 +293,18 @@ def test(data,
     maps = np.zeros(nc) + map
     for i, c in enumerate(ap_class):
         maps[c] = ap[i]
-
-    return (mp, mr, map50, map75, map85, map95, map_95, f1m, *(loss.cpu() / len(dataloader)).tolist()), maps, t
+    return (mp, mr, map50,map75, map85, map95,map_95, f1m, *(loss.cpu() / len(dataloader)).tolist()), maps, t
+    # return (mp, mr, map50, map, *(loss.cpu() / len(dataloader)).tolist()), maps, t
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(prog='test_2.py')
-    parser.add_argument('--weights', nargs='+', type=str, default='./best_614_ARG.pt', help='model.pt path(s)')
-    parser.add_argument('--data', type=str, default='./co_test3.yaml', help='*.data path')
+    parser = argparse.ArgumentParser(prog='test_3.py')
+    parser.add_argument('--weights', nargs='+', type=str, default='./weights/best_2023_5_25.pt',
+                        help='model.pt path(s)')
+    parser.add_argument('--data', type=str, default='data/co_test3.yaml', help='*.data path')
     parser.add_argument('--batch-size', type=int, default=1, help='size of each image batch')
-    parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
-    parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')
+    parser.add_argument('--img-size', type=int, default=480, help='inference size (pixels)')
+    parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.5, help='IOU threshold for NMS')
     parser.add_argument('--task', default='test', help='train, val, test, speed or study')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
@@ -312,7 +315,7 @@ if __name__ == '__main__':
     parser.add_argument('--save-hybrid', action='store_true', help='save label+prediction hybrid results to *.txt')
     parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
     parser.add_argument('--save-json', action='store_true', help='save a cocoapi-compatible JSON results file')
-    parser.add_argument('--project', default='runs/test_2_best1', help='save to project/name')
+    parser.add_argument('--project', default='runs/test_2', help='save to project/name')
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
@@ -321,7 +324,7 @@ if __name__ == '__main__':
     opt.save_json |= opt.data.endswith('co_test3.yaml')
     opt.data = check_file(opt.data)  # check file
     print(opt)
-    #check_requirements()
+    # check_requirements()
 
     if opt.task in ('train', 'val', 'test'):  # run normally
         test(opt.data,
@@ -343,7 +346,8 @@ if __name__ == '__main__':
 
     elif opt.task == 'speed':  # speed benchmarks
         for w in opt.weights:
-            test(opt.data, w, opt.batch_size, opt.img_size, 0.25, 0.45, save_json=False, plots=False, v5_metric=opt.v5_metric)
+            test(opt.data, w, opt.batch_size, opt.img_size, 0.25, 0.45, save_json=False, plots=False,
+                 v5_metric=opt.v5_metric)
 
     elif opt.task == 'study':  # run over a range of settings and save/plot
         # python test.py --task study --data coco.yaml --iou 0.65 --weights yolov7.pt
